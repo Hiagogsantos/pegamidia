@@ -16,7 +16,8 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "br.escola.pegamidia"
-    compileSdk = flutter.compileSdkVersion
+    // receive_sharing_intent 1.9 exige compilar contra o Android 37 (não muda o targetSdk nem o minSdk).
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
