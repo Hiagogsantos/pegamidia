@@ -1,0 +1,89 @@
+# Gera os APKs e publica na página de Releases a cada tag "v*" (ex.: git tag v1.0.0 && git push --tags).
+#
+# Assinatura (opcional, recomendada): crie estes GitHub Secrets em Settings → Secrets and variables → Actions:
+#   ANDROID_KEYSTORE_BASE64    keystore em base64   (base64 -w0 upload-keystore.jks)
+#   ANDROID_KEYSTORE_PASSWORD  senha da keystore
+#   ANDROID_KEY_ALIAS          alias da chave (ex.: upload)
+#   ANDROID_KEY_PASSWORD       senha da chave
+# Sem esses secrets o APK é assinado com a chave de debug (instala, mas não dá para atualizar
+# por cima de uma versão assinada com a chave definitiva).
+name: Gerar APK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.7"
+          channel: stable
+          cache: true
+
+      - name: Preparar assinatura
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::Secrets da keystore não configurados: APK assinado com a chave de debug."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<PROPS
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=app/upload-keystore.jks
+          PROPS
+
+      - run: flutter pub get
+      - run: flutter test
+
+      - name: Compilar APKs
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSAO="${GITHUB_REF_NAME#v}"
+            flutter build apk --release --split-per-abi --build-name="$VERSAO" --build-number="${GITHUB_RUN_NUMBER}"
+          else
+            flutter build apk --release --split-per-abi
+          fi
+          cd build/app/outputs/flutter-apk
+          for f in app-*-release.apk; do mv "$f" "PegaMidia-${f#app-}"; done
+          ls -lh
+
+      - name: Apagar a keystore do runner
+        if: always()
+        run: rm -f android/app/upload-keystore.jks android/key.properties
+
+      - name: Guardar APKs (artefato)
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: app/build/app/outputs/flutter-apk/PegaMidia-*.apk
+
+      - name: Publicar na página de Releases
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/app/outputs/flutter-apk/PegaMidia-*.apk
+          body: |
+            APKs do PegaMídia (uso interno da escola, não publicado na Play Store).
+            Na dúvida, instale o **PegaMidia-arm64-v8a-release.apk** (a maioria dos celulares atuais).

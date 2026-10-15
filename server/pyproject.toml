@@ -1,0 +1,10 @@
+[project]
+name = "pegamidia-server"
+version = "1.0.0"
+description = "Servidor do PegaMídia: FastAPI + yt-dlp + ffmpeg (projeto escolar, sem fins comerciais)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

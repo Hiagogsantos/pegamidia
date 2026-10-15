@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  O servidor do PegaMídia roda num PC da escola e é acessado por HTTP (ex.: http://192.168.0.10:8000).
+  O Android não permite liberar HTTP só para uma faixa de IPs (192.168.x.x, 10.x.x.x), então o
+  HTTP sem criptografia é liberado aqui. O app só usa HTTP para falar com o servidor configurado;
+  os sites de vídeo continuam sendo acessados por HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
