@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 
@@ -52,6 +54,23 @@ class _ItemDownload extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Não consegui abrir: ${resultado.message}')),
       );
+    }
+  }
+
+  Future<void> _renomear(BuildContext context) async {
+    final novoNome = await showDialog<String>(
+      context: context,
+      builder: (_) => _DialogoRenomear(nomeAtual: item.titulo),
+    );
+    if (novoNome == null || !context.mounted) return;
+    try {
+      await AppScope.of(context).downloads.renomear(item, novoNome);
+    } on FileSystemException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Não consegui renomear: ${e.message}')),
+        );
+      }
     }
   }
 
@@ -115,6 +134,8 @@ class _ItemDownload extends StatelessWidget {
                     _abrir(context);
                   case 'compartilhar':
                     compartilharDownload(context, item);
+                  case 'renomear':
+                    _renomear(context);
                   case 'apagar':
                     _apagar(context);
                 }
@@ -124,10 +145,65 @@ class _ItemDownload extends StatelessWidget {
                   const PopupMenuItem(value: 'abrir', child: ListTile(leading: Icon(Icons.play_arrow), title: Text('Abrir'))),
                   const PopupMenuItem(
                       value: 'compartilhar', child: ListTile(leading: Icon(Icons.share), title: Text('Compartilhar'))),
+                  const PopupMenuItem(
+                      value: 'renomear', child: ListTile(leading: Icon(Icons.edit), title: Text('Renomear'))),
                 ],
                 const PopupMenuItem(value: 'apagar', child: ListTile(leading: Icon(Icons.delete), title: Text('Apagar'))),
               ],
             ),
+    );
+  }
+}
+
+/// Caixa para digitar o novo nome (já vem com o nome atual selecionado).
+class _DialogoRenomear extends StatefulWidget {
+  const _DialogoRenomear({required this.nomeAtual});
+
+  final String nomeAtual;
+
+  @override
+  State<_DialogoRenomear> createState() => _DialogoRenomearState();
+}
+
+class _DialogoRenomearState extends State<_DialogoRenomear> {
+  late final _campo = TextEditingController(text: widget.nomeAtual)
+    ..selection = TextSelection(baseOffset: 0, extentOffset: widget.nomeAtual.length);
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    super.dispose();
+  }
+
+  void _confirmar() {
+    final nome = _campo.text.trim();
+    if (nome.isNotEmpty) Navigator.pop(context, nome);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Renomear'),
+      content: TextField(
+        controller: _campo,
+        autofocus: true,
+        textCapitalization: TextCapitalization.sentences,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _confirmar(),
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(
+          labelText: 'Nome do arquivo',
+          helperText: 'É o nome que aparece ao enviar por e-mail ou WhatsApp.',
+          helperMaxLines: 2,
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: _campo.text.trim().isEmpty ? null : _confirmar,
+          child: const Text('Renomear'),
+        ),
+      ],
     );
   }
 }
