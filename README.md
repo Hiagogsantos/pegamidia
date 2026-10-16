@@ -47,7 +47,7 @@ Ordem que o app segue:
 | Facebook (vídeos e reels) | yt-dlp | Vídeos privados não são suportados |
 | X / Twitter | yt-dlp | |
 | TikTok | yt-dlp | Links curtos `vm.tiktok.com` funcionam |
-| Instagram | yt-dlp | Só posts públicos |
+| Instagram | yt-dlp (servidor) ou captura pela página (app) | Só posts públicos. Na captura, o app junta imagem e som, que o Instagram entrega separados |
 | Kwai | Captura pela página (app) / fallback do servidor | Sem extrator dedicado no yt-dlp |
 | Shopee | Captura pela página (app) / fallback do servidor | Links curtos `br.shp.ee/...` funcionam |
 
@@ -162,6 +162,7 @@ storeFile=/caminho/para/upload-keystore.jks
 - Android: o app libera HTTP sem criptografia para conseguir falar com o servidor na rede local (`http://192.168.x.x:8000`); o Android não permite liberar só uma faixa de IPs.
 - iOS: compila, mas receber links pelo "Compartilhar" exige configurar uma Share Extension no Xcode (veja a documentação do `receive_sharing_intent`).
 - Vídeos com `src` do tipo `blob:` (players MSE) não podem ser baixados direto; nesses casos o app usa a URL `.m3u8` capturada da rede e envia ao servidor.
+- Instagram e Facebook entregam a imagem e o som em arquivos MP4 separados, pedidos em pedaços (`bytestart`/`byteend` na URL). A captura junta os pedaços de cada arquivo, descobre qual é imagem e qual é som pelo cabeçalho do MP4 e, no Android, junta os dois com o `MediaMuxer` do sistema (sem reconverter e sem aumentar o app). Em outras plataformas o vídeo sai sem som.
 - O ícone foi gerado por [`tools/gerar_icone.py`](tools/gerar_icone.py) e não usa logos de nenhuma plataforma.
 
 ## Licença
