@@ -4,18 +4,22 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/download_item.dart';
+import 'juntar_midia.dart';
 import 'link_utils.dart';
 import 'server_api.dart';
 
 /// Guarda a lista de downloads e executa cada um (pelo servidor ou direto da página).
 class DownloadManager extends ChangeNotifier {
-  DownloadManager(this._api, this._prefs, {Dio? dio, Future<Directory> Function()? pasta})
+  DownloadManager(this._api, this._prefs,
+      {Dio? dio, Future<Directory> Function()? pasta, JuntarVideoEAudio? juntar})
       : _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 20))),
-        _pastaBase = pasta ?? getApplicationDocumentsDirectory;
+        _pastaBase = pasta ?? getApplicationDocumentsDirectory,
+        _juntar = juntar ?? juntarNoAparelho;
 
   static const _chave = 'downloads';
   static const _intervaloStatus = Duration(seconds: 1);
@@ -24,6 +28,7 @@ class DownloadManager extends ChangeNotifier {
   final SharedPreferences _prefs;
   final Dio _dio;
   final Future<Directory> Function() _pastaBase;
+  final JuntarVideoEAudio _juntar;
   final List<DownloadItem> _itens = [];
   final Map<String, CancelToken> _cancelar = {};
 
@@ -171,26 +176,10 @@ class DownloadManager extends ChangeNotifier {
         ..estado = EstadoDownload.transferindo
         ..mensagem = 'Baixando…';
       _mudou(item);
-      await _dio.download(
-        videoUrl,
-        destino.path,
-        cancelToken: cancelar,
-        options: Options(headers: cabecalhos, receiveTimeout: const Duration(minutes: 2)),
-        onReceiveProgress: (recebido, total) {
-          if (total > 0) _progresso(item, recebido / total);
-        },
-      );
+      await _baixarArquivo(videoUrl, destino, cabecalhos, cancelar, (fracao) => _progresso(item, fracao));
       _concluir(item, destino);
     } on DioException catch (e) {
-      final codigo = e.response?.statusCode;
-      _falhar(
-        item,
-        e.type == DioExceptionType.cancel
-            ? 'Cancelado.'
-            : codigo != null
-                ? 'O site recusou o download (erro $codigo).'
-                : 'Falha de conexão ao baixar o vídeo.',
-      );
+      _falhar(item, _mensagemDio(e));
     } catch (e) {
       _falhar(item, 'Erro inesperado: $e');
     } finally {
@@ -203,6 +192,96 @@ class DownloadManager extends ChangeNotifier {
     if ((valor - item.progresso).abs() < 0.01 && valor < 1) return;
     item.progresso = valor;
     _mudou(item);
+  }
+
+  /// Instagram/Facebook: a imagem e o som vêm em arquivos separados. Baixa os dois
+  /// (com os cabeçalhos do WebView) e junta num MP4 normal no próprio celular.
+  DownloadItem baixarDiretoComAudio({
+    required String videoUrl,
+    required String audioUrl,
+    required String pagina,
+    required String titulo,
+    Map<String, String> cabecalhos = const {},
+    int? tamanhoVideo,
+    int? tamanhoAudio,
+  }) {
+    final item = _novo(titulo, pagina, TipoMidia.video, OrigemDownload.pagina);
+    unawaited(_executarComAudio(item, videoUrl, audioUrl, cabecalhos, tamanhoVideo, tamanhoAudio));
+    return item;
+  }
+
+  Future<void> _executarComAudio(DownloadItem item, String videoUrl, String audioUrl,
+      Map<String, String> cabecalhos, int? tamanhoVideo, int? tamanhoAudio) async {
+    final cancelar = _cancelar[item.id] = CancelToken();
+    final temporaria = Directory('${(await _pastaBase()).path}/PegaMidia/.temporario/${item.id}');
+    try {
+      await temporaria.create(recursive: true);
+      final arquivoVideo = File('${temporaria.path}/video.mp4');
+      final arquivoAudio = File('${temporaria.path}/audio.mp4');
+      // A barra anda proporcional ao tamanho de cada parte (imagem costuma ser bem maior).
+      final pesoVideo = (tamanhoVideo != null && tamanhoAudio != null && tamanhoVideo + tamanhoAudio > 0)
+          ? tamanhoVideo / (tamanhoVideo + tamanhoAudio)
+          : 0.85;
+      item
+        ..estado = EstadoDownload.transferindo
+        ..mensagem = 'Baixando a imagem…';
+      _mudou(item);
+      await _baixarArquivo(videoUrl, arquivoVideo, cabecalhos, cancelar,
+          (fracao) => _progresso(item, fracao * pesoVideo));
+      item.mensagem = 'Baixando o som…';
+      _mudou(item);
+      await _baixarArquivo(audioUrl, arquivoAudio, cabecalhos, cancelar,
+          (fracao) => _progresso(item, pesoVideo + fracao * (1 - pesoVideo)));
+
+      item.mensagem = 'Juntando imagem e som…';
+      _mudou(item);
+      final destino = await _caminhoLivre('${limparNomeArquivo(item.titulo)}.mp4');
+      try {
+        await _juntar(arquivoVideo.path, arquivoAudio.path, destino.path);
+      } on PlatformException catch (e) {
+        _semSom(item, arquivoVideo, destino, 'não foi possível juntar o som: ${e.message}');
+        return;
+      } on MissingPluginException {
+        _semSom(item, arquivoVideo, destino, 'este aparelho não junta imagem e som');
+        return;
+      }
+      _concluir(item, destino);
+    } on DioException catch (e) {
+      _falhar(item, _mensagemDio(e));
+    } catch (e) {
+      _falhar(item, 'Erro inesperado: $e');
+    } finally {
+      _cancelar.remove(item.id);
+      if (await temporaria.exists()) await temporaria.delete(recursive: true);
+    }
+  }
+
+  /// Se não der para juntar, ao menos entrega a imagem (sem som) e avisa.
+  void _semSom(DownloadItem item, File video, File destino, String motivo) {
+    video.copySync(destino.path);
+    debugPrint('PegaMídia: salvo sem som ($motivo)');
+    item.titulo = '${item.titulo} (sem som)';
+    _concluir(item, destino);
+  }
+
+  Future<void> _baixarArquivo(String url, File destino, Map<String, String> cabecalhos, CancelToken cancelar,
+      void Function(double fracao) progresso) {
+    return _dio.download(
+      url,
+      destino.path,
+      cancelToken: cancelar,
+      options: Options(headers: cabecalhos, receiveTimeout: const Duration(minutes: 2)),
+      onReceiveProgress: (recebido, total) {
+        if (total > 0) progresso(recebido / total);
+      },
+    );
+  }
+
+  String _mensagemDio(DioException e) {
+    final codigo = e.response?.statusCode;
+    if (e.type == DioExceptionType.cancel) return 'Cancelado.';
+    if (codigo != null) return 'O site recusou o download (erro $codigo).';
+    return 'Falha de conexão ao baixar o vídeo.';
   }
 
   void _concluir(DownloadItem item, File arquivo) {

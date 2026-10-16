@@ -7,14 +7,22 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../app_scope.dart';
 import '../models/download_item.dart';
 import '../services/link_utils.dart';
+import '../services/midia_dash.dart';
 
 /// Vídeo encontrado na página (equivale a uma linha da aba Network do F12).
 class VideoCapturado {
-  VideoCapturado(this.url, this.tipo);
+  VideoCapturado(this.url, this.tipo, {this.trilha});
 
   final String url;
   final TipoVideo tipo;
   int? tamanho;
+
+  /// Só imagem / só som / os dois (Instagram e Facebook separam imagem e som).
+  TrilhaMidia? trilha;
+  String? resolucao;
+
+  bool get soAudio => trilha == TrilhaMidia.soAudio;
+  bool get soVideo => trilha == TrilhaMidia.soVideo;
 }
 
 /// Abre o link num WebView e captura os vídeos que a página carrega —
@@ -80,11 +88,14 @@ class _CaptureScreenState extends State<CaptureScreen> {
     super.dispose();
   }
 
-  void _anotar(String? url, {String? contentType}) {
-    if (url == null || _videos.containsKey(url)) return;
+  void _anotar(String? bruta, {String? contentType}) {
+    if (bruta == null) return;
+    // Instagram/Facebook pedem o mesmo arquivo em vários pedaços: junta tudo numa URL só.
+    final url = normalizarUrlVideo(bruta);
+    if (_videos.containsKey(url)) return;
     final tipo = classificarUrlVideo(url, contentType: contentType);
     if (tipo == null) return;
-    final video = VideoCapturado(url, tipo);
+    final video = VideoCapturado(url, tipo, trilha: trilhaPelaUrl(url));
     if (!mounted) return;
     setState(() => _videos[url] = video);
     if (!tipo.emPedacos) unawaited(_medir(video));
@@ -121,13 +132,16 @@ class _CaptureScreenState extends State<CaptureScreen> {
         'Referer': _pagina,
       };
 
-  /// Tamanho estimado: lê o Content-Length (ou Content-Range) sem baixar o vídeo todo.
+  static const _bytesCabecalho = 64 * 1024;
+
+  /// Lê só o começo do arquivo: dá o tamanho total (Content-Range) e, pelo cabeçalho
+  /// do MP4, se ele tem imagem, som ou os dois, e a resolução.
   Future<void> _medir(VideoCapturado video) async {
     try {
       final r = await _dio.get<ResponseBody>(
         video.url,
         options: Options(
-          headers: {..._cabecalhosBasicos(), 'Range': 'bytes=0-0'},
+          headers: {..._cabecalhosBasicos(), 'Range': 'bytes=0-${_bytesCabecalho - 1}'},
           responseType: ResponseType.stream,
           receiveTimeout: const Duration(seconds: 10),
           validateStatus: (s) => s != null && s < 400,
@@ -137,8 +151,23 @@ class _CaptureScreenState extends State<CaptureScreen> {
       final tamanho = faixa != null
           ? int.tryParse(faixa.split('/').last)
           : int.tryParse(r.headers.value('content-length') ?? '');
-      unawaited(r.data?.stream.listen((_) {}).cancel());
-      if (mounted && tamanho != null && tamanho > 1) setState(() => video.tamanho = tamanho);
+      final inicio = <int>[];
+      final fluxo = r.data?.stream;
+      if (fluxo != null) {
+        await for (final pedaco in fluxo) {
+          inicio.addAll(pedaco);
+          if (inicio.length >= _bytesCabecalho) break; // sai do fluxo e fecha a conexão
+        }
+      }
+      final info = analisarInicioMp4(inicio);
+      if (!mounted) return;
+      setState(() {
+        if (tamanho != null && tamanho > 1) video.tamanho = tamanho;
+        if (info != null) {
+          video.trilha = info.trilha;
+          video.resolucao = info.resolucao;
+        }
+      });
     } catch (_) {
       // sem tamanho: tudo bem
     }
@@ -163,12 +192,30 @@ class _CaptureScreenState extends State<CaptureScreen> {
     return _titulo ?? 'Vídeo da página';
   }
 
+  /// Melhor arquivo só de som achado na página (Instagram/Facebook).
+  VideoCapturado? get _audioSeparado {
+    final audios = _videos.values.where((v) => v.soAudio).toList()
+      ..sort((a, b) => (b.tamanho ?? 0).compareTo(a.tamanho ?? 0));
+    return audios.isEmpty ? null : audios.first;
+  }
+
   Future<void> _baixar(VideoCapturado video, {bool soAudio = false}) async {
     final scope = AppScope.of(context);
     final titulo = await _tituloDaPagina();
     if (!mounted) return;
+    final audio = video.soVideo ? _audioSeparado : null;
 
-    if (video.tipo.emPedacos || soAudio) {
+    if (video.soVideo && audio != null && !soAudio) {
+      scope.downloads.baixarDiretoComAudio(
+        videoUrl: video.url,
+        audioUrl: audio.url,
+        pagina: _pagina,
+        titulo: titulo,
+        cabecalhos: await _cabecalhosCompletos(video.url),
+        tamanhoVideo: video.tamanho,
+        tamanhoAudio: audio.tamanho,
+      );
+    } else if (video.tipo.emPedacos || soAudio) {
       if (!scope.settings.temServidor) {
         await showDialog<void>(
           context: context,
@@ -184,7 +231,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
         return;
       }
       scope.downloads.baixarPeloServidor(
-        url: video.url,
+        url: soAudio ? (audio ?? video).url : video.url,
         tipo: soAudio ? TipoMidia.audio : TipoMidia.video,
         qualidade: 'melhor',
         titulo: titulo,
@@ -203,7 +250,8 @@ class _CaptureScreenState extends State<CaptureScreen> {
     if (mounted) Navigator.of(context).pop(true);
   }
 
-  List<VideoCapturado> get _ordenados => _videos.values.toList()
+  /// Arquivos só de som não aparecem na lista: eles são juntados ao vídeo na hora de baixar.
+  List<VideoCapturado> get _ordenados => _videos.values.where((v) => !v.soAudio).toList()
     ..sort((a, b) {
       final p = a.tipo.preferencia.compareTo(b.tipo.preferencia);
       return p != 0 ? p : (b.tamanho ?? 0).compareTo(a.tamanho ?? 0);
@@ -214,7 +262,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
     final temServidor = AppScope.of(context).settings.temServidor;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_videos.isEmpty ? 'Procurando vídeo…' : 'Vídeos encontrados: ${_videos.length}'),
+        title: Text(_ordenados.isEmpty ? 'Procurando vídeo…' : 'Vídeos encontrados: ${_ordenados.length}'),
         bottom: _carregamento < 1
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(3),
@@ -278,6 +326,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
 
   Widget _painel(bool temServidor) {
     final tema = Theme.of(context);
+    final audio = _audioSeparado;
     final segundos = DateTime.now().difference(_inicio).inSeconds;
     return Material(
       elevation: 8,
@@ -286,7 +335,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
         top: false,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 260),
-          child: _videos.isEmpty
+          child: _ordenados.isEmpty
               ? Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
@@ -310,10 +359,19 @@ class _CaptureScreenState extends State<CaptureScreen> {
                         leading: Icon(v.tipo.emPedacos ? Icons.view_module : Icons.movie),
                         title: Text([
                           v.tipo.name.toUpperCase(),
-                          if (v.tamanho != null) formatarTamanho(v.tamanho),
+                          ?v.resolucao,
+                          if (v.tamanho != null) formatarTamanho(v.tamanho! + (v.soVideo ? audio?.tamanho ?? 0 : 0)),
                           if (v.tipo.emPedacos) '(via servidor)',
                         ].join(' • ')),
-                        subtitle: Text(Uri.tryParse(v.url)?.host ?? v.url, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(
+                          v.soVideo
+                              ? (audio != null
+                                  ? 'Imagem + som (o app junta os dois)'
+                                  : 'Sem som ainda: toque no play do vídeo para o app achar o som')
+                              : Uri.tryParse(v.url)?.host ?? v.url,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [

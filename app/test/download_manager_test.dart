@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pegamidia/models/download_item.dart';
 import 'package:pegamidia/models/media_info.dart';
@@ -45,6 +45,8 @@ class ServidorFalso implements HttpClientAdapter {
         'tamanho': pronto ? 4 : null,
       });
     }
+    if (caminho == '/imagem.mp4') return ResponseBody.fromBytes(List.filled(30, 1), 200);
+    if (caminho == '/som.mp4') return ResponseBody.fromBytes(List.filled(10, 2), 200);
     if (caminho == '/arquivo/abc123' || caminho == '/video.mp4') {
       return ResponseBody.fromBytes([1, 2, 3, 4], 200, headers: {
         Headers.contentLengthHeader: ['4'],
@@ -58,6 +60,8 @@ class ServidorFalso implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+typedef JuntarFalso = Future<void> Function(String video, String audio, String saida);
+
 void main() {
   late Directory pasta;
 
@@ -68,12 +72,12 @@ void main() {
 
   tearDown(() => pasta.delete(recursive: true));
 
-  Future<(DownloadManager, ServidorFalso)> criar({String? erro}) async {
+  Future<(DownloadManager, ServidorFalso)> criar({String? erro, JuntarFalso? juntar}) async {
     final falso = ServidorFalso(erro: erro);
     final dio = Dio()..httpClientAdapter = falso;
     final api = ServerApi(() => 'http://192.168.0.10:8000', dio: dio);
     final prefs = await SharedPreferences.getInstance();
-    final manager = DownloadManager(api, prefs, dio: dio, pasta: () async => pasta);
+    final manager = DownloadManager(api, prefs, dio: dio, pasta: () async => pasta, juntar: juntar);
     return (manager, falso);
   }
 
@@ -120,6 +124,51 @@ void main() {
     final nomes = m.itens.map((i) => i.caminho!.split('/').last).toSet();
     expect(nomes, {'Caneca presente.mp4', 'Caneca presente (2).mp4'});
     expect(falso.pedidos.last.headers['Referer'], 'https://shopee.com.br/produto');
+  });
+
+  test('Instagram: baixa imagem e som separados e junta num MP4', () async {
+    String? juntouVideo;
+    String? juntouAudio;
+    final (m, falso) = await criar(juntar: (video, audio, saida) async {
+      juntouVideo = video;
+      juntouAudio = audio;
+      expect(File(video).lengthSync(), 30);
+      expect(File(audio).lengthSync(), 10);
+      File(saida).writeAsBytesSync([...File(video).readAsBytesSync(), ...File(audio).readAsBytesSync()]);
+    });
+    m.baixarDiretoComAudio(
+      videoUrl: 'https://instagram.fna.fbcdn.net/imagem.mp4',
+      audioUrl: 'https://instagram.fna.fbcdn.net/som.mp4',
+      pagina: 'https://www.instagram.com/reel/abc/',
+      titulo: 'Tesoura de cozinha',
+      cabecalhos: {'Referer': 'https://www.instagram.com/'},
+    );
+    await esperarFim(m);
+
+    final item = m.itens.single;
+    expect(item.estado, EstadoDownload.concluido, reason: item.mensagem);
+    expect(item.caminho, endsWith('PegaMidia/Tesoura de cozinha.mp4'));
+    expect(item.tamanho, 40);
+    expect(juntouVideo, endsWith('video.mp4'));
+    expect(juntouAudio, endsWith('audio.mp4'));
+    // os arquivos temporários são apagados
+    expect(Directory('${pasta.path}/PegaMidia/.temporario/${item.id}').existsSync(), isFalse);
+    expect(falso.pedidos.where((p) => p.headers['Referer'] == 'https://www.instagram.com/').length, 2);
+  });
+
+  test('Instagram: se não der para juntar, salva a imagem e avisa que está sem som', () async {
+    final (m, _) = await criar(juntar: (_, _, _) async => throw MissingPluginException());
+    m.baixarDiretoComAudio(
+      videoUrl: 'https://instagram.fna.fbcdn.net/imagem.mp4',
+      audioUrl: 'https://instagram.fna.fbcdn.net/som.mp4',
+      pagina: 'https://www.instagram.com/reel/abc/',
+      titulo: 'Reel',
+    );
+    await esperarFim(m);
+    final item = m.itens.single;
+    expect(item.estado, EstadoDownload.concluido);
+    expect(item.titulo, 'Reel (sem som)');
+    expect(item.tamanho, 30);
   });
 
   test('salva e recarrega a lista; download interrompido vira erro', () async {
