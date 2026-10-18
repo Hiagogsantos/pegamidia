@@ -183,3 +183,47 @@ def test_limpeza_apaga_mais_de_24h(tmp_path):
     assert g.limpar_antigos() == 1
     assert not velho.exists() and novo.exists()
     g.encerrar()
+
+
+def test_normalizar_url_tira_pedacos():
+    url = "https://x.fbcdn.net/v.mp4?efg=abc%3D&_nc_ht=x&bytestart=0&byteend=999#f"
+    assert fallback.normalizar_url(url) == "https://x.fbcdn.net/v.mp4?efg=abc%3D&_nc_ht=x#f"
+    assert fallback.normalizar_url("https://x/v.mp4?bytestart=1&byteend=2") == "https://x/v.mp4"
+    assert fallback.normalizar_url("https://x/v.mp4?a=1") == "https://x/v.mp4?a=1"
+
+
+def test_trilha_pela_url():
+    import base64
+    import json
+
+    def url(tag):
+        efg = base64.urlsafe_b64encode(json.dumps({"vencode_tag": tag}).encode()).decode().rstrip("=")
+        return f"https://x.fbcdn.net/v.mp4?efg={efg}"
+
+    assert fallback.trilha_pela_url(url("ig.dash_baseline_1_v1")) == "video"
+    assert fallback.trilha_pela_url(url("ig.dash_ln_heaac_vbr3_audio")) == "audio"
+    assert fallback.trilha_pela_url(url("xpv_progressive")) is None
+    assert fallback.trilha_pela_url("https://x/v.mp4?efg=!!!") is None
+
+
+def test_escolher_melhor_junta_imagem_com_o_melhor_som():
+    V = fallback.VideoEncontrado
+    escolhido = fallback.escolher_melhor([
+        V("https://a/som-pequeno.mp4", "mp4", "p", tamanho=10, trilha="audio"),
+        V("https://a/imagem-480.mp4", "mp4", "p", tamanho=300, trilha="video"),
+        V("https://a/imagem-720.mp4", "mp4", "p", tamanho=900, trilha="video"),
+        V("https://a/som-bom.mp4", "mp4", "p", tamanho=50, trilha="audio"),
+    ])
+    assert escolhido.url == "https://a/imagem-720.mp4"
+    assert escolhido.url_audio == "https://a/som-bom.mp4"
+    # só som, sem imagem: nada para baixar como vídeo
+    assert fallback.escolher_melhor([V("https://a/som.mp4", "mp4", "p", trilha="audio")]) is None
+
+
+def test_resumir_info_link_direto_sem_codec_tem_video_e_audio():
+    """yt-dlp não informa o codec de um .mp4 direto: não pode virar "só áudio"."""
+    r = downloader.resumir_info({"title": "x", "formats": [{"ext": "mp4", "url": "https://a/v.mp4"}]},
+                                "https://a/v.mp4")
+    assert r["tem_video"] and r["tem_audio"]
+    so_som = downloader.resumir_info({"formats": [{"ext": "mp3"}]}, "https://a/s.mp3")
+    assert not so_som["tem_video"] and so_som["tem_audio"]

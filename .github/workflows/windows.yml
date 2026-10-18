@@ -1,0 +1,110 @@
+# Versão Windows: gera o PegaMidia.exe (com yt-dlp, ffmpeg e Deno dentro), testa o
+# executável de verdade e cria o instalador.
+#
+# - Pull request que mexe no servidor: gera e testa (os arquivos ficam em "Artifacts").
+# - Manual (aba Actions → "Windows" → Run workflow): idem. Rode de novo quando algum site
+#   parar de funcionar, para pegar o yt-dlp mais recente.
+# - Tag "v*" (ex.: v1.1.0): também anexa o instalador na página de Releases.
+name: Windows
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements*.txt
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-windows.txt
+          python -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
+
+      - name: Baixar ffmpeg e Deno
+        run: |
+          New-Item -ItemType Directory -Force ferramentas, "$env:RUNNER_TEMP\baixados" | Out-Null
+          $tmp = "$env:RUNNER_TEMP\baixados"
+          # ffmpeg montado pelo próprio projeto yt-dlp (feito para ele)
+          Invoke-WebRequest https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip -OutFile "$tmp\ffmpeg.zip"
+          Expand-Archive "$tmp\ffmpeg.zip" -DestinationPath "$tmp\ffmpeg"
+          $bin = (Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          Copy-Item "$bin\ffmpeg.exe", "$bin\ffprobe.exe" ferramentas
+          Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter LICENSE.txt | Select-Object -First 1 | Copy-Item -Destination ferramentas\LICENCA-ffmpeg.txt
+          # Deno: o yt-dlp precisa dele para vários vídeos do YouTube
+          Invoke-WebRequest https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip -OutFile "$tmp\deno.zip"
+          Expand-Archive "$tmp\deno.zip" -DestinationPath ferramentas
+          Get-ChildItem ferramentas | Format-Table Name, Length
+          .\ferramentas\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+          .\ferramentas\deno.exe --version
+
+      - name: Gerar o PegaMidia.exe
+        run: pyinstaller --noconfirm desktop/PegaMidia.spec
+
+      - name: Autoteste do executável
+        run: |
+          # "site" local com um MP4 e uma página que só mostra o vídeo por JavaScript
+          $site = "$env:RUNNER_TEMP\site"
+          New-Item -ItemType Directory -Force $site | Out-Null
+          Copy-Item ..\app\test\fixtures\video_e_audio.mp4, tests\site_teste\pagina_js.html $site
+          $servidor = Start-Process python -ArgumentList "-m", "http.server", "8123", "--bind", "127.0.0.1", "--directory", $site -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $env:PEGAMIDIA_PERMITIR_LOCAL = "1"
+          $env:PEGAMIDIA_PASTA_USUARIO = "$env:RUNNER_TEMP\usuario"
+          $p = Start-Process dist\PegaMidia\PegaMidia.exe -Wait -PassThru -ArgumentList "--teste", "http://127.0.0.1:8123/video_e_audio.mp4", "http://127.0.0.1:8123/pagina_js.html"
+          Stop-Process -Id $servidor.Id -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\PegaMidia\pegamidia.log" -Tail 60
+          Get-ChildItem "$env:RUNNER_TEMP\usuario"
+          if ($p.ExitCode -ne 0) { throw "Autoteste do executável falhou (código $($p.ExitCode))" }
+
+      - name: Versão
+        id: versao
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "1.0.0-teste.$env:GITHUB_RUN_NUMBER" }
+          "valor=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Instalador e versão portátil
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DVersao=${{ steps.versao.outputs.valor }}" desktop\instalador.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup falhou" }
+          Compress-Archive dist\PegaMidia "dist\PegaMidia-Windows-portatil-${{ steps.versao.outputs.valor }}.zip"
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Guardar (artefato)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PegaMidia-Windows
+          path: |
+            server/dist/PegaMidia-Instalador-*.exe
+            server/dist/PegaMidia-Windows-portatil-*.zip
+          if-no-files-found: error
+
+      - name: Publicar na página de Releases
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            server/dist/PegaMidia-Instalador-*.exe
+            server/dist/PegaMidia-Windows-portatil-*.zip

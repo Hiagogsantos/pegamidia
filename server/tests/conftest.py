@@ -1,4 +1,6 @@
+import base64
 import functools
+import json
 import http.server
 import os
 import shutil
@@ -37,6 +39,20 @@ def site_local(tmp_path_factory):
         "setTimeout(() => { const v = document.createElement('video');"
         " v.src = '/' + ['produto', 'mp4'].join('.'); v.muted = true;"
         " document.getElementById('p').appendChild(v); v.play().catch(() => {}); }, 300);"
+        "</script></body></html>",
+        encoding="utf-8",
+    )
+    # Como o Instagram: imagem e som em MP4s separados, pedidos em pedaços (bytestart/byteend)
+    fixtures = Path(__file__).resolve().parents[2] / "app" / "test" / "fixtures"
+    for nome in ("so_video_dash.mp4", "so_audio_dash.mp4"):
+        shutil.copy(fixtures / nome, raiz / nome)
+    efg_video = base64.urlsafe_b64encode(json.dumps({"vencode_tag": "ig-xpvds.clips.dash_baseline_1_v1"}).encode()).decode()
+    efg_audio = base64.urlsafe_b64encode(json.dumps({"vencode_tag": "ig-xpvds.clips.dash_ln_heaac_vbr3_audio"}).encode()).decode()
+    (raiz / "dash.html").write_text(
+        "<html><head><title>Reel de teste</title></head><body><script>"
+        f"fetch('/so_video_dash.mp4?efg={efg_video}&_nc_ht=x&bytestart=0&byteend=999');"
+        f"fetch('/so_audio_dash.mp4?efg={efg_audio}&_nc_ht=x&bytestart=0&byteend=499');"
+        f"fetch('/so_video_dash.mp4?efg={efg_video}&_nc_ht=x&bytestart=1000&byteend=1999');"
         "</script></body></html>",
         encoding="utf-8",
     )

@@ -1,0 +1,4 @@
+# Versão Windows (PegaMidia.exe): servidor + janela própria + empacotador.
+-r requirements.txt
+pywebview>=5
+pyinstaller>=6.10

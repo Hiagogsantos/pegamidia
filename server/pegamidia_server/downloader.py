@@ -6,6 +6,8 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -129,17 +131,28 @@ def precisa_fallback(mensagem: str, site: str) -> bool:
     m = (mensagem or "").lower()
     if "unsupported url" in m or "no video formats found" in m or "no video could be found" in m:
         return True
-    return site in SITES_SEM_EXTRATOR or site == "outro"
+    # Instagram e Facebook costumam pedir login ao yt-dlp; a página pública ainda mostra o vídeo.
+    return site in SITES_SEM_EXTRATOR or site in ("outro", "instagram", "facebook")
+
+
+_SO_AUDIO = ("mp3", "m4a", "opus", "ogg", "oga", "wav", "aac", "flac")
+
+
+def _tem_imagem(formato: dict[str, Any]) -> bool:
+    vcodec = formato.get("vcodec")
+    if vcodec is None:
+        return formato.get("ext") not in _SO_AUDIO
+    return vcodec != "none"
 
 
 def resumir_info(info: dict[str, Any], url: str) -> dict[str, Any]:
     """Resumo das informações do yt-dlp no formato do endpoint ``/info``."""
     site = detectar_site(url)
     formatos = info.get("formats") or []
-    tem_video = any((f.get("vcodec") or "none") != "none" for f in formatos) or (
-        not formatos and info.get("ext") not in ("mp3", "m4a", "opus")
-    )
-    tem_audio = any((f.get("acodec") or "none") != "none" for f in formatos) or not formatos
+    # Codec ausente (None) = desconhecido, comum em links diretos de .mp4: não dá para
+    # dizer que não há imagem/som. Só "none" significa que a trilha não existe.
+    tem_video = any(_tem_imagem(f) for f in formatos) or (not formatos and info.get("ext") not in _SO_AUDIO)
+    tem_audio = any(f.get("acodec") != "none" for f in formatos) or not formatos
 
     por_altura: dict[int, dict[str, Any]] = {}
     for f in formatos:
@@ -304,6 +317,8 @@ def baixar(
         _limpar_pasta(pasta)
         acompanhar.partes_concluidas = 0
         acompanhar.titulo_enviado = True
+        if video.url_audio:
+            return juntar_imagem_e_som(video, tipo, pasta, nome, atualizar)
         try:
             tentar(video.url, video.cabecalhos, nome)
         except DownloadError as erro2:
@@ -313,6 +328,35 @@ def baixar(
     if final is None:
         raise ErroDownload("O download terminou, mas o arquivo não foi encontrado.")
     return final
+
+
+def juntar_imagem_e_som(video: fallback.VideoEncontrado, tipo: str, pasta: Path, nome: str,
+                        atualizar: Callable[..., None]) -> Path:
+    """Instagram/Facebook entregam imagem e som em arquivos separados: o ffmpeg baixa
+    os dois (com os mesmos cabeçalhos da página) e junta num MP4, sem reconverter.
+    Para "só áudio", converte o som em MP3."""
+    cabecalhos = "".join(f"{k}: {v}\r\n" for k, v in video.cabecalhos.items())
+    if tipo == "audio":
+        saida = pasta / f"{_limpar_nome(nome)}.mp3"
+        entradas = ["-headers", cabecalhos, "-i", video.url_audio]
+        resto = ["-vn", "-c:a", "libmp3lame", "-b:a", "192k"]
+        atualizar(estado="baixando", mensagem="Baixando o som…")
+    else:
+        saida = pasta / f"{_limpar_nome(nome)}.mp4"
+        entradas = ["-headers", cabecalhos, "-i", video.url, "-headers", cabecalhos, "-i", video.url_audio]
+        resto = ["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart"]
+        atualizar(estado="baixando", mensagem="Baixando e juntando imagem e som…")
+    comando = [shutil.which("ffmpeg") or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+               *entradas, *resto, str(saida)]
+    extras = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+    try:
+        resultado = subprocess.run(comando, capture_output=True, text=True, timeout=1800, **extras)
+    except subprocess.TimeoutExpired as erro:
+        raise ErroDownload("O download demorou demais.") from erro
+    if resultado.returncode != 0 or not saida.exists():
+        detalhe = (resultado.stderr or "").strip().splitlines()[-1:] or ["erro desconhecido"]
+        raise ErroDownload(f"Não consegui juntar imagem e som: {detalhe[0][:200]}")
+    return saida
 
 
 def _limpar_pasta(pasta: Path) -> None:
