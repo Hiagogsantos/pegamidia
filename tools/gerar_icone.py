@@ -47,6 +47,9 @@ def main() -> None:
         icone = desenhar(tamanho, redondo=False)
         fundo.paste(icone, mask=icone)
         fundo.save(arquivo)
+    # Windows (PegaMidia.exe e instalador): um .ico com vários tamanhos
+    desenhar(256).save(RAIZ.parent / "server/desktop/pegamidia.ico",
+                       sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     print("Ícones gerados.")
 
 

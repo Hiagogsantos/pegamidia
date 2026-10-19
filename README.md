@@ -85,6 +85,7 @@ cd server
 | `POST` | `/download` | `{url, tipo: "video"\|"audio", qualidade: "720p"\|"480p"\|"360p"\|"melhor"}` → `{job_id}` |
 | `GET` | `/status/{job_id}` | estado (`na_fila`, `baixando`, `processando`, `concluido`, `erro`), progresso (%), mensagem, nome do arquivo |
 | `GET` | `/arquivo/{job_id}` | envia o arquivo pronto |
+| `GET` | `/` | tela do PegaMídia (a mesma da versão Windows) |
 
 A documentação interativa fica em `http://<ip-do-servidor>:8000/docs`.
 
@@ -164,6 +165,33 @@ storeFile=/caminho/para/upload-keystore.jks
 - Vídeos com `src` do tipo `blob:` (players MSE) não podem ser baixados direto; nesses casos o app usa a URL `.m3u8` capturada da rede e envia ao servidor.
 - Instagram e Facebook entregam a imagem e o som em arquivos MP4 separados, pedidos em pedaços (`bytestart`/`byteend` na URL). A captura junta os pedaços de cada arquivo, descobre qual é imagem e qual é som pelo cabeçalho do MP4 e, no Android, junta os dois com o `MediaMuxer` do sistema (sem reconverter e sem aumentar o app). Em outras plataformas o vídeo sai sem som.
 - O ícone foi gerado por [`tools/gerar_icone.py`](tools/gerar_icone.py) e não usa logos de nenhuma plataforma.
+
+## Versão para Windows (PegaMidia.exe)
+
+Programa para o computador, **sem instalar Python nem nada**: já vem com o yt-dlp, o ffmpeg e o Deno (que o yt-dlp usa no YouTube).
+
+- Abre uma janela com a mesma ideia do app: colar o link, ver a prévia, escolher **Vídeo (MP4)** ou **Áudio (MP3)**, a qualidade e o **nome do arquivo**, e baixar.
+- Os arquivos ficam em **Downloads\PegaMidia**. Na lista dá para **Abrir**, **Mostrar na pasta**, **Renomear** e **Apagar**.
+- Avisa quando o arquivo passa de ~25 MB (limite de anexo do e-mail).
+- Shopee, Kwai e Instagram: se o yt-dlp não reconhecer a página, o programa abre a página escondido no Microsoft Edge (que já vem no Windows) e captura o vídeo. No Instagram, junta a imagem e o som.
+- **Também é o servidor dos celulares**: enquanto estiver aberto, o rodapé mostra o endereço (ex.: `http://192.168.0.10:8000`) para colocar no app, em Configurações.
+
+### Baixar e instalar
+
+1. Na aba **Actions → "Windows" → Run workflow** (ou crie uma tag `v*`, que publica na página de Releases).
+2. Quando terminar (~10 min), baixe em **Artifacts** o `PegaMidia-Windows`. Dentro dele há:
+   - `PegaMidia-Instalador-<versão>.exe`: instalador. Não pede senha de administrador e cria atalho no menu Iniciar (e, se quiser, na Área de Trabalho).
+   - `PegaMidia-Windows-portatil-<versão>.zip`: versão sem instalar. Descompacte e abra `PegaMidia.exe`.
+3. Como o programa não tem assinatura digital paga, o Windows pode mostrar **"O Windows protegeu o computador"**. Clique em **Mais informações → Executar assim mesmo**.
+4. Na primeira vez, o Firewall do Windows pergunta se o PegaMídia pode usar a rede. Permita em **redes privadas** para os celulares conseguirem se conectar (pode exigir a senha de administrador). Para usar só no computador, não precisa permitir.
+
+Requisitos: Windows 10 ou 11 de 64 bits. A janela usa o WebView2 do Edge, que já vem no Windows 11 e nos Windows 10 atualizados. Sem ele, o programa abre no navegador padrão.
+
+**Quando algum site parar de funcionar**, rode o workflow "Windows" de novo: ele sempre pega o yt-dlp mais recente. Depois instale a versão nova por cima.
+
+Erros ficam registrados em `%LOCALAPPDATA%\PegaMidia\pegamidia.log`.
+
+O mesmo servidor também mostra essa tela no navegador: com `python -m pegamidia_server` rodando, abra `http://localhost:8000`.
 
 ## Licença
 

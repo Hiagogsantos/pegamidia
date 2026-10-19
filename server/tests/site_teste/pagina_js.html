@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- Página de teste: o vídeo só aparece via JavaScript (como na Shopee). Usada pelo autoteste do executável. -->
+<html><head><meta charset="utf-8"><title>Produto de teste</title></head>
+<body><div id="p"></div><script>
+setTimeout(function () {
+  var v = document.createElement('video');
+  v.src = '/' + ['video_e_audio', 'mp4'].join('.');
+  v.muted = true;
+  document.getElementById('p').appendChild(v);
+  v.play().catch(function () {});
+}, 300);
+</script></body></html>

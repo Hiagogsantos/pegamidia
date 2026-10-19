@@ -171,6 +171,42 @@ void main() {
     expect(item.tamanho, 30);
   });
 
+  test('renomear muda o nome na lista e o arquivo, mantendo a extensão', () async {
+    final (m, _) = await criar();
+    for (final titulo in ['Vídeo A', 'Vídeo B']) {
+      m.baixarDireto(videoUrl: 'https://cdn.exemplo.com/video.mp4', pagina: 'https://x.com/p', titulo: titulo);
+      await esperarFim(m);
+    }
+    final b = m.itens.first; // mais recente primeiro
+    final a = m.itens.last;
+
+    await m.renomear(b, '  Tesoura: presente bingo das mães ');
+    expect(b.titulo, 'Tesoura: presente bingo das mães');
+    expect(b.caminho, endsWith('PegaMidia/Tesoura presente bingo das mães.mp4'));
+    expect(File(b.caminho!).existsSync(), isTrue);
+    expect(File('${pasta.path}/PegaMidia/Vídeo B.mp4').existsSync(), isFalse);
+
+    // nome já usado por outro arquivo: não sobrescreve
+    await m.renomear(a, 'Tesoura presente bingo das mães');
+    expect(a.caminho, endsWith('PegaMidia/Tesoura presente bingo das mães (2).mp4'));
+    expect(File(b.caminho!).existsSync(), isTrue);
+
+    // mesmo nome do arquivo: só troca o título, não cria " (2)"
+    final antes = b.caminho;
+    await m.renomear(b, 'Tesoura presente bingo das mães');
+    expect(b.caminho, antes);
+
+    // nome vazio é ignorado
+    await m.renomear(b, '   ');
+    expect(b.titulo, 'Tesoura presente bingo das mães');
+
+    // a lista salva guarda o nome novo
+    final (outro, _) = await criar();
+    await outro.carregar();
+    expect(outro.itens.first.titulo, 'Tesoura presente bingo das mães');
+    expect(outro.itens.first.estado, EstadoDownload.concluido);
+  });
+
   test('salva e recarrega a lista; download interrompido vira erro', () async {
     final (m, _) = await criar();
     m.baixarPeloServidor(url: 'https://youtu.be/abc', tipo: TipoMidia.video);

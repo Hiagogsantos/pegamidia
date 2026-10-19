@@ -34,6 +34,8 @@ class Tarefa:
     bytes_baixados: int | None = None
     arquivo: Path | None = None
     criado_em: float = field(default_factory=time.time)
+    # versão Windows: ao terminar, o arquivo vai para a pasta do usuário (Downloads\PegaMidia)
+    mover_para_usuario: bool = False
 
     def publico(self) -> dict:
         tamanho = None
@@ -57,19 +59,42 @@ class Tarefa:
 Baixador = Callable[..., Path]
 
 
+def caminho_livre(pasta: Path, nome: str, ignorar: Path | None = None) -> Path:
+    """``pasta/nome``; se já existir, ``nome (2).ext``, ``nome (3).ext``…"""
+    destino = pasta / nome
+    raiz, ext = destino.stem, destino.suffix
+    n = 2
+    while destino.exists() and destino != ignorar:
+        destino = pasta / f"{raiz} ({n}){ext}"
+        n += 1
+    return destino
+
+
+def mover_sem_sobrescrever(arquivo: Path, pasta: Path) -> Path:
+    pasta.mkdir(parents=True, exist_ok=True)
+    destino = caminho_livre(pasta, arquivo.name)
+    shutil.move(str(arquivo), destino)
+    return destino
+
+
 class GerenciadorTarefas:
-    def __init__(self, pasta: Path, max_paralelo: int = 2, baixador: Baixador = baixar):
+    def __init__(self, pasta: Path, max_paralelo: int = 2, baixador: Baixador = baixar,
+                 pasta_usuario: Path | None = None):
         self.pasta = pasta
         self.pasta.mkdir(parents=True, exist_ok=True)
+        # Pasta onde ficam os arquivos do usuário (versão Windows). Não é limpa automaticamente.
+        self.pasta_usuario = pasta_usuario
         self._baixador = baixador
         self._tarefas: dict[str, Tarefa] = {}
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=max_paralelo, thread_name_prefix="download")
 
     def criar(self, url: str, tipo: str, qualidade: str, formato_audio: str = "mp3",
-              referer: str | None = None, titulo: str | None = None) -> Tarefa:
+              referer: str | None = None, titulo: str | None = None,
+              mover_para_usuario: bool = False) -> Tarefa:
         tarefa = Tarefa(id=uuid.uuid4().hex[:12], url=url, tipo=tipo, qualidade=qualidade,
-                        formato_audio=formato_audio, referer=referer, titulo=titulo)
+                        formato_audio=formato_audio, referer=referer, titulo=titulo,
+                        mover_para_usuario=mover_para_usuario and self.pasta_usuario is not None)
         with self._lock:
             self._tarefas[tarefa.id] = tarefa
         self._executor.submit(self._executar, tarefa)
@@ -78,6 +103,11 @@ class GerenciadorTarefas:
     def obter(self, job_id: str) -> Tarefa | None:
         with self._lock:
             return self._tarefas.get(job_id)
+
+    def listar(self) -> list[Tarefa]:
+        """Tarefas recentes, mais novas primeiro."""
+        with self._lock:
+            return sorted(self._tarefas.values(), key=lambda t: t.criado_em, reverse=True)
 
     def _atualizar(self, tarefa: Tarefa, **campos) -> None:
         with self._lock:
@@ -92,6 +122,9 @@ class GerenciadorTarefas:
                 lambda **c: self._atualizar(tarefa, **c),
                 formato_audio=tarefa.formato_audio, referer=tarefa.referer, titulo=tarefa.titulo,
             )
+            if tarefa.mover_para_usuario and self.pasta_usuario is not None:
+                arquivo = mover_sem_sobrescrever(arquivo, self.pasta_usuario)
+                shutil.rmtree(pasta, ignore_errors=True)
             self._atualizar(tarefa, arquivo=arquivo, estado="concluido", progresso=100.0,
                             mensagem="Pronto!")
         except ErroDownload as erro:

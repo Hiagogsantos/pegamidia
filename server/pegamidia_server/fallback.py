@@ -9,6 +9,8 @@ Estratégia:
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
@@ -16,7 +18,7 @@ import threading
 import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 import httpx
 
@@ -76,6 +78,10 @@ class VideoEncontrado:
     titulo: str | None = None
     miniatura: str | None = None
     tamanho: int | None = None
+    # Instagram/Facebook: "video" = só imagem, "audio" = só som (arquivos DASH separados)
+    trilha: str | None = None
+    # quando a imagem e o som vêm separados, o som fica aqui e os dois são juntados
+    url_audio: str | None = None
 
     @property
     def cabecalhos(self) -> dict[str, str]:
@@ -96,15 +102,60 @@ def classificar(url: str, content_type: str | None = None) -> str | None:
     return achado.group(1).lower() if achado else None
 
 
+_PARAMETROS_DE_PEDACO = ("bytestart", "byteend")
+
+
+def normalizar_url(url: str) -> str:
+    """Instagram e Facebook pedem o mesmo arquivo em pedaços (``bytestart``/``byteend``
+    na URL). Sem esses parâmetros a CDN entrega o arquivo inteiro."""
+    inicio = url.find("?")
+    if inicio < 0:
+        return url
+    fim = url.find("#", inicio)
+    fim = len(url) if fim < 0 else fim
+    partes = url[inicio + 1:fim].split("&")
+    mantidas = [p for p in partes if p and p.split("=", 1)[0] not in _PARAMETROS_DE_PEDACO]
+    if len(mantidas) == len([p for p in partes if p]):
+        return url
+    consulta = "&".join(mantidas)
+    return url[:inicio] + (f"?{consulta}" if consulta else "") + url[fim:]
+
+
+def trilha_pela_url(url: str) -> str | None:
+    """Lê o ``vencode_tag`` do parâmetro ``efg`` (JSON em base64) das URLs do
+    Instagram/Facebook: ``..._audio`` é só som; ``dash_...`` é só imagem."""
+    efg = parse_qs(urlsplit(url).query).get("efg", [None])[0]
+    if not efg:
+        return None
+    try:
+        dados = json.loads(base64.urlsafe_b64decode(efg + "=" * (-len(efg) % 4)))
+        tag = str(dados.get("vencode_tag", "")).lower()
+    except Exception:
+        return None
+    if "audio" in tag:
+        return "audio"
+    if "dash" in tag:
+        return "video"
+    return None
+
+
 def escolher_melhor(candidatos: list[VideoEncontrado]) -> VideoEncontrado | None:
-    """Prefere MP4; entre vários MP4 fica com o maior (normalmente a melhor qualidade)."""
+    """Prefere MP4; entre vários MP4 fica com o maior (normalmente a melhor qualidade).
+
+    Se a imagem e o som vierem separados (Instagram/Facebook), devolve a imagem com
+    o melhor som em ``url_audio``, para o download juntar os dois."""
+    audios = [c for c in candidatos if c.trilha == "audio"]
+    candidatos = [c for c in candidatos if c.trilha != "audio"]
     if not candidatos:
         return None
     ordem = {id(c): i for i, c in enumerate(candidatos)}
-    return min(
+    melhor = min(
         candidatos,
         key=lambda c: (_PREFERENCIA.get(c.tipo, 9), -(c.tamanho or 0), ordem[id(c)]),
     )
+    if melhor.trilha == "video" and audios:
+        melhor.url_audio = max(audios, key=lambda c: c.tamanho or 0).url
+    return melhor
 
 
 class _LeitorMeta(HTMLParser):
@@ -194,10 +245,16 @@ def procurar_com_navegador(url: str, espera: float = 25.0) -> tuple[list[VideoEn
     estado = {"pagina": url}
 
     def anotar(u: str, tipo: str | None, tamanho: int | None = None) -> None:
-        if not tipo or u in vistos:
+        if not tipo:
             return
-        vistos.add(u)
-        candidatos.append(VideoEncontrado(u, tipo, estado["pagina"], tamanho=tamanho))
+        inteira = normalizar_url(u)
+        if inteira != u:
+            tamanho = None  # o tamanho era só do pedaço
+        if inteira in vistos:
+            return
+        vistos.add(inteira)
+        candidatos.append(VideoEncontrado(inteira, tipo, estado["pagina"], tamanho=tamanho,
+                                          trilha=trilha_pela_url(inteira)))
 
     def na_resposta(resp) -> None:
         try:
@@ -212,6 +269,8 @@ def procurar_com_navegador(url: str, espera: float = 25.0) -> tuple[list[VideoEn
         navegador = p.chromium.launch(
             headless=True,
             executable_path=os.environ.get("PEGAMIDIA_CHROMIUM") or None,
+            # Versão Windows: usa o Microsoft Edge que já vem no sistema.
+            channel=os.environ.get("PEGAMIDIA_NAVEGADOR_CANAL") or None,
             args=["--autoplay-policy=no-user-gesture-required"],
         )
         try:
@@ -255,9 +314,27 @@ def procurar_com_navegador(url: str, espera: float = 25.0) -> tuple[list[VideoEn
                 )
             except Exception:
                 pass
+            cabecalhos = {"User-Agent": USER_AGENT, "Referer": pagina.url}
+            for c in candidatos:
+                if c.trilha and c.tamanho is None:
+                    c.tamanho = medir_tamanho(c.url, cabecalhos)
             return candidatos, pagina.url, titulo, miniatura
         finally:
             navegador.close()
+
+
+def medir_tamanho(url: str, cabecalhos: dict[str, str]) -> int | None:
+    """Tamanho total do arquivo sem baixá-lo (Content-Range de um pedido de 1 byte)."""
+    try:
+        with httpx.Client(follow_redirects=True, timeout=10, headers=cabecalhos) as cliente:
+            r = cliente.get(url, headers={"Range": "bytes=0-0"})
+            faixa = r.headers.get("content-range", "")
+            if "/" in faixa and faixa.rsplit("/", 1)[1].isdigit():
+                return int(faixa.rsplit("/", 1)[1])
+            tamanho = r.headers.get("content-length")
+            return int(tamanho) if r.status_code == 200 and tamanho and tamanho.isdigit() else None
+    except httpx.HTTPError:
+        return None
 
 
 # Cache curto: o /info descobre o vídeo e o /download reaproveita sem abrir o navegador de novo.

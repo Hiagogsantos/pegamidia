@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PegaMídia</title>
+<style>
+  :root {
+    --fundo: #f4f7f6; --cartao: #ffffff; --texto: #17201e; --suave: #5b6b67; --borda: #d9e2df;
+    --primaria: #00796b; --primaria-texto: #ffffff; --primaria-clara: #d7efea;
+    --erro: #b3261e; --erro-fundo: #fbe9e7; --aviso: #8a5a00; --aviso-fundo: #fff4d6;
+    --sombra: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #0f1514; --cartao: #182120; --texto: #e3ece9; --suave: #9fb2ad; --borda: #2b3836;
+      --primaria: #4fd1bb; --primaria-texto: #00201b; --primaria-clara: #1e3a35;
+      --erro: #ffb4ab; --erro-fundo: #3b1512; --aviso: #ffd27a; --aviso-fundo: #3a2c08;
+      --sombra: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fundo); color: var(--texto);
+    font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 14px 24px;
+    background: var(--cartao); border-bottom: 1px solid var(--borda);
+  }
+  header h1 { font-size: 20px; margin: 0; flex: 1; }
+  main { max-width: 920px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 16px; }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px; padding: 18px; box-shadow: var(--sombra); }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .linha { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=url], select {
+    font: inherit; color: inherit; background: var(--fundo); border: 1px solid var(--borda);
+    border-radius: 10px; padding: 10px 12px; min-width: 0;
+  }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--primaria); outline-offset: 1px; }
+  #link { flex: 1 1 320px; }
+  button {
+    font: inherit; border: 1px solid var(--borda); background: var(--cartao); color: var(--texto);
+    border-radius: 999px; padding: 9px 16px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: var(--primaria); }
+  button.primario { background: var(--primaria); color: var(--primaria-texto); border-color: var(--primaria); font-weight: 600; }
+  button.pequeno { padding: 5px 11px; font-size: 13px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .dica { color: var(--suave); font-size: 13px; margin: 8px 0 0; }
+  .mensagem { border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+  .mensagem.erro { background: var(--erro-fundo); color: var(--erro); }
+  .mensagem.aviso { background: var(--aviso-fundo); color: var(--aviso); }
+  .mensagem.info { background: var(--primaria-clara); }
+  .previa { display: grid; grid-template-columns: 240px 1fr; gap: 18px; }
+  .previa.sem-imagem { grid-template-columns: 1fr; }
+  .previa img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 10px; background: var(--borda); }
+  .previa h3 { margin: 0 0 4px; font-size: 17px; }
+  .meta { color: var(--suave); font-size: 13px; margin-bottom: 12px; }
+  .opcoes { display: grid; gap: 10px; }
+  .opcoes label.campo { display: grid; gap: 4px; font-size: 13px; color: var(--suave); max-width: 460px; }
+  .opcoes label.campo select, .opcoes label.campo input { color: var(--texto); font-size: 15px; }
+  .segmentado { display: inline-flex; justify-self: start; border: 1px solid var(--borda); border-radius: 999px; overflow: hidden; }
+  .segmentado button { border: 0; border-radius: 0; }
+  .segmentado button[aria-pressed=true] { background: var(--primaria-clara); font-weight: 600; }
+  .lista { display: grid; gap: 2px; }
+  .item { display: grid; grid-template-columns: 36px 1fr auto; gap: 12px; align-items: center; padding: 10px 6px; border-top: 1px solid var(--borda); }
+  .item:first-child { border-top: 0; }
+  .icone { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--primaria-clara); font-size: 17px; }
+  .nome { font-weight: 600; overflow-wrap: anywhere; }
+  .sub { color: var(--suave); font-size: 13px; }
+  .sub.erro { color: var(--erro); }
+  .acoes { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  progress { width: 100%; height: 6px; accent-color: var(--primaria); }
+  .vazio { color: var(--suave); text-align: center; padding: 18px; }
+  footer { color: var(--suave); font-size: 13px; text-align: center; padding: 0 16px 24px; }
+  footer code { background: var(--primaria-clara); color: var(--texto); padding: 2px 6px; border-radius: 6px; }
+  dialog { border: 1px solid var(--borda); border-radius: 16px; background: var(--cartao); color: var(--texto); max-width: 520px; width: calc(100% - 32px); padding: 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog h2 { margin-top: 0; }
+  dialog .botoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  dialog input { width: 100%; }
+  ul.regras { padding-left: 20px; margin: 8px 0; }
+  .oculto { display: none !important; }
+  @media (max-width: 640px) {
+    .previa { grid-template-columns: 1fr; }
+    .item { grid-template-columns: 36px 1fr; }
+    .acoes { grid-column: 1 / -1; justify-content: flex-start; }
+    header { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <svg width="34" height="34" viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="50" cy="50" r="50" fill="#00897B"/>
+    <rect x="24" y="24" width="52" height="34" rx="5" fill="none" stroke="#fff" stroke-width="4.5"/>
+    <path d="M44 33 L44 49 L57 41 Z" fill="#fff"/>
+    <rect x="46.5" y="60" width="7" height="11" fill="#fff"/>
+    <path d="M39 68 L61 68 L50 79 Z" fill="#fff"/>
+  </svg>
+  <h1>PegaMídia</h1>
+  <button id="btn-pasta" class="oculto" title="Abrir a pasta Downloads\PegaMidia">📁 Abrir pasta</button>
+  <button id="btn-sobre">Sobre</button>
+</header>
+
+<main>
+  <section class="cartao" aria-labelledby="t-novo">
+    <h2 id="t-novo">Cole o link do vídeo</h2>
+    <form id="form-busca" class="linha" autocomplete="off" novalidate>
+      <input id="link" type="url" placeholder="https://… (YouTube, Instagram, TikTok, Facebook, X, Kwai, Shopee…)" required>
+      <button type="button" id="btn-colar">Colar</button>
+      <button type="submit" id="btn-buscar" class="primario">Buscar</button>
+    </form>
+    <div id="msg-busca" class="mensagem oculto" role="status"></div>
+  </section>
+
+  <section id="cartao-previa" class="cartao oculto" aria-labelledby="previa-titulo">
+    <div class="previa" id="previa">
+      <img id="previa-imagem" alt="">
+      <div>
+        <h3 id="previa-titulo"></h3>
+        <div id="previa-meta" class="meta"></div>
+        <div class="opcoes">
+          <div class="segmentado" role="group" aria-label="O que baixar">
+            <button type="button" id="op-video" aria-pressed="true">🎬 Vídeo (MP4)</button>
+            <button type="button" id="op-audio" aria-pressed="false">🎵 Áudio (MP3)</button>
+          </div>
+          <label class="campo" id="campo-qualidade">Qualidade
+            <select id="qualidade">
+              <option value="720p" selected>720p (recomendado, bom para e-mail)</option>
+              <option value="480p">480p</option>
+              <option value="360p">360p (arquivo menor)</option>
+              <option value="melhor">Melhor disponível</option>
+            </select>
+          </label>
+          <label class="campo">Nome do arquivo
+            <input id="nome-arquivo" type="text" maxlength="150">
+          </label>
+          <div id="previa-tamanho" class="dica"></div>
+          <div><button id="btn-baixar" class="primario">⬇ Baixar</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-downloads">
+    <h2 id="t-downloads">Downloads</h2>
+    <div id="lista" class="lista"></div>
+    <div id="lista-vazia" class="vazio">Nenhum download ainda.</div>
+    <p id="dica-pasta" class="dica oculto"></p>
+  </section>
+</main>
+
+<footer>
+  <div id="rodape-rede" class="oculto"></div>
+  <div id="rodape-versao"></div>
+</footer>
+
+<dialog id="dlg-renomear">
+  <form method="dialog">
+    <h2>Renomear</h2>
+    <input id="novo-nome" type="text" maxlength="150" required aria-label="Novo nome">
+    <p class="dica">É o nome que aparece ao enviar por e-mail ou WhatsApp. A extensão (.mp4/.mp3) é mantida.</p>
+    <div class="botoes">
+      <button value="cancelar" formnovalidate>Cancelar</button>
+      <button value="ok" class="primario">Renomear</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirmar">
+  <form method="dialog">
+    <h2>Apagar?</h2>
+    <p id="confirmar-texto"></p>
+    <div class="botoes">
+      <button value="cancelar">Cancelar</button>
+      <button value="ok" class="primario">Apagar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-sobre">
+  <form method="dialog">
+    <h2>Sobre o PegaMídia</h2>
+    <p class="mensagem aviso"><strong>⚠️ Projeto escolar, sem fins comerciais.</strong><br>
+      Criado para uso educacional e interno de uma escola (ex.: salvar vídeos de produtos para o bingo,
+      materiais de aula, gravações próprias). Não é vendido, não tem anúncios e não deve ser usado comercialmente.</p>
+    <ul class="regras">
+      <li>Baixe só conteúdo seu, com permissão do autor ou de licença livre.</li>
+      <li>Não redistribua músicas e vídeos de terceiros. Respeite os direitos autorais.</li>
+      <li>Os termos do YouTube não permitem baixar vídeos fora dos recursos oficiais: o PegaMídia é só para uso interno da escola.</li>
+      <li>Respeite os termos de uso de cada site. Os autores não se responsabilizam pelo uso indevido.</li>
+      <li>Vídeos privados ou que exigem login não são suportados.</li>
+    </ul>
+    <p class="dica">Este programa não é afiliado ao YouTube, Google, Meta, X, TikTok, Kwai ou Shopee.
+      Licença PolyForm Noncommercial 1.0.0. Usa o yt-dlp (Unlicense) e o ffmpeg.</p>
+    <div class="botoes"><button value="ok" class="primario">Fechar</button></div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+const LIMITE_EMAIL = 25 * 1024 * 1024;
+const $ = (id) => document.getElementById(id);
+let computador = false;     // true quando aberto no próprio PC (versão Windows)
+let info = null;            // resposta do /info
+let linkAtual = null;
+let tipo = "video";
+const tarefas = new Map();  // job_id -> status
+
+function guardar() {
+  try { localStorage.setItem("pegamidia-tarefas", JSON.stringify([...tarefas.keys()])); } catch (e) {}
+}
+function recuperar() {
+  try { return JSON.parse(localStorage.getItem("pegamidia-tarefas") || "[]"); } catch (e) { return []; }
+}
+
+async function api(caminho, corpo) {
+  const opcoes = { headers: { "X-PegaMidia": "1" } };
+  if (corpo !== undefined) {
+    opcoes.method = "POST";
+    opcoes.headers["Content-Type"] = "application/json";
+    opcoes.body = JSON.stringify(corpo);
+  }
+  let r;
+  try { r = await fetch(caminho, opcoes); }
+  catch (e) { throw new Error("O PegaMídia não está respondendo. Feche e abra o programa de novo."); }
+  const dados = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = dados.detail;
+    throw new Error(typeof d === "string" ? d : "Pedido inválido.");
+  }
+  return dados;
+}
+
+function tamanho(bytes) {
+  if (!bytes) return "";
+  const u = ["B", "KB", "MB", "GB"]; let v = bytes, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(i >= 2 ? 1 : 0).replace(".", ",") + " " + u[i];
+}
+function duracao(s) {
+  if (!s) return "";
+  s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+function mostrar(el, texto, tipoMsg) {
+  el.textContent = texto; el.className = "mensagem " + tipoMsg; el.classList.toggle("oculto", !texto);
+}
+function el(tag, props = {}, ...filhos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "onclick") e.addEventListener("click", v); else if (k === "class") e.className = v; else e[k] = v;
+  }
+  for (const f of filhos) if (f != null) e.append(f);
+  return e;
+}
+
+// ---------- busca ----------
+async function buscar() {
+  const texto = $("link").value.trim();
+  const achado = texto.match(/https?:\/\/[^\s<>"']+/i);
+  $("cartao-previa").classList.add("oculto");
+  if (!achado) { mostrar($("msg-busca"), "Link inválido. Cole um endereço que comece com http:// ou https://.", "erro"); return; }
+  linkAtual = achado[0].replace(/[.,;:!?)\]}]+$/, "");
+  $("btn-buscar").disabled = true;
+  mostrar($("msg-busca"), "Buscando informações do vídeo… (páginas como Shopee e Instagram podem levar até 40 s)", "info");
+  try {
+    info = await api("/info", { url: linkAtual });
+    mostrarPrevia();
+    mostrar($("msg-busca"), "", "info");
+  } catch (e) {
+    mostrar($("msg-busca"), e.message, "erro");
+  } finally {
+    $("btn-buscar").disabled = false;
+  }
+}
+
+function mostrarPrevia() {
+  $("previa-imagem").src = info.miniatura || "";
+  $("previa-imagem").classList.toggle("oculto", !info.miniatura);
+  $("previa").classList.toggle("sem-imagem", !info.miniatura);
+  $("previa-titulo").textContent = info.titulo;
+  $("previa-meta").textContent = [info.site_nome, info.autor, duracao(info.duracao)].filter(Boolean).join(" • ");
+  $("nome-arquivo").value = info.titulo.slice(0, 150);
+  escolherTipo(info.tem_video ? "video" : "audio");
+  $("op-video").disabled = !info.tem_video;
+  $("op-audio").disabled = !info.tem_audio;
+  $("cartao-previa").classList.remove("oculto");
+}
+
+function escolherTipo(t) {
+  tipo = t;
+  $("op-video").setAttribute("aria-pressed", String(t === "video"));
+  $("op-audio").setAttribute("aria-pressed", String(t === "audio"));
+  $("campo-qualidade").classList.toggle("oculto", t !== "video" || (info && info.fonte === "pagina"));
+  estimar();
+}
+
+function estimar() {
+  const caixa = $("previa-tamanho");
+  caixa.textContent = "";
+  if (!info || tipo !== "video" || !info.formatos) return;
+  const q = $("qualidade").value;
+  const limite = q === "melhor" ? Infinity : parseInt(q, 10);
+  const comAltura = info.formatos.filter((f) => f.altura && f.tamanho_aprox);
+  if (!comAltura.length) return;
+  const abaixo = comAltura.filter((f) => f.altura <= limite);
+  const f = (abaixo.length ? abaixo : comAltura).reduce((a, b) => (b.altura > a.altura ? b : a));
+  caixa.textContent = f.tamanho_aprox > LIMITE_EMAIL
+    ? `⚠️ Cerca de ${tamanho(f.tamanho_aprox)}: grande demais para anexar em e-mail (limite ~25 MB). Escolha 360p ou envie pelo WhatsApp/Drive.`
+    : `Cerca de ${tamanho(f.tamanho_aprox)}`;
+}
+
+async function baixar() {
+  const nome = $("nome-arquivo").value.trim();
+  $("btn-baixar").disabled = true;
+  try {
+    const r = await api("/download", {
+      url: linkAtual, tipo, qualidade: $("qualidade").value, titulo: nome || null,
+    });
+    tarefas.set(r.job_id, { estado: "na_fila", progresso: 0, mensagem: "Na fila…", titulo: nome || info.titulo });
+    guardar();
+    desenhar();
+    acompanhar(r.job_id);
+    $("cartao-previa").classList.add("oculto");
+    $("link").value = "";
+    $("link").focus();
+  } catch (e) {
+    mostrar($("msg-busca"), e.message, "erro");
+  } finally {
+    $("btn-baixar").disabled = false;
+  }
+}
+
+async function acompanhar(id) {
+  while (tarefas.has(id)) {
+    try {
+      const st = await api(`/status/${id}`);
+      tarefas.set(id, st);
+      if (st.estado === "concluido" || st.estado === "erro") {
+        if (st.estado === "concluido" && computador) { tarefas.delete(id); await carregarArquivos(); }
+        guardar(); desenhar(); return;
+      }
+      desenhar();
+    } catch (e) {
+      if (String(e.message).includes("não encontrada")) { tarefas.delete(id); guardar(); desenhar(); return; }
+    }
+    await new Promise((ok) => setTimeout(ok, 1000));
+  }
+}
+
+// ---------- lista ----------
+let arquivos = [];
+
+async function carregarArquivos() {
+  if (!computador) return;
+  try {
+    const r = await api("/local/arquivos");
+    arquivos = r.arquivos;
+    $("dica-pasta").textContent = "Os arquivos ficam em " + r.pasta;
+    $("dica-pasta").classList.remove("oculto");
+  } catch (e) { /* mantém a lista anterior */ }
+  desenhar();
+}
+
+function itemTarefa(id, st) {
+  const erro = st.estado === "erro";
+  const pronto = st.estado === "concluido";
+  const acoes = el("div", { class: "acoes" });
+  if (pronto) acoes.append(el("a", { href: `/arquivo/${id}`, download: st.nome_arquivo || "" }, el("button", { class: "pequeno primario" }, "Salvar arquivo")));
+  if (pronto || erro) acoes.append(el("button", { class: "pequeno", onclick: () => { tarefas.delete(id); guardar(); desenhar(); } }, "Remover da lista"));
+  const sub = el("div", { class: "sub" + (erro ? " erro" : "") }, pronto ? [tamanho(st.tamanho), st.nome_arquivo].filter(Boolean).join(" • ") : st.mensagem);
+  const corpo = el("div", {}, el("div", { class: "nome" }, st.titulo || "Preparando…"), sub);
+  if (!pronto && !erro) corpo.append(el("progress", { max: 100, value: st.progresso || 0 }));
+  return el("div", { class: "item" }, el("div", { class: "icone" }, erro ? "⚠️" : pronto ? "✅" : "⏳"), corpo, acoes);
+}
+
+function itemArquivo(a) {
+  const audio = /\.(mp3|m4a)$/i.test(a.nome);
+  const grande = a.tamanho > LIMITE_EMAIL;
+  const data = new Date(a.modificado * 1000).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const sub = el("div", { class: "sub" }, [tamanho(a.tamanho), data, grande ? "⚠️ grande para e-mail (~25 MB)" : null].filter(Boolean).join(" • "));
+  const acoes = el("div", { class: "acoes" },
+    el("button", { class: "pequeno primario", onclick: () => api("/local/abrir", { nome: a.nome }).catch(alertar) }, "Abrir"),
+    el("button", { class: "pequeno", onclick: () => api("/local/mostrar", { nome: a.nome }).catch(alertar) }, "Mostrar na pasta"),
+    el("button", { class: "pequeno", onclick: () => renomear(a) }, "Renomear"),
+    el("button", { class: "pequeno", onclick: () => apagar(a) }, "Apagar"));
+  return el("div", { class: "item" }, el("div", { class: "icone" }, audio ? "🎵" : "🎬"),
+    el("div", {}, el("div", { class: "nome" }, a.nome), sub), acoes);
+}
+
+function desenhar() {
+  const lista = $("lista");
+  lista.replaceChildren(
+    ...[...tarefas.entries()].map(([id, st]) => itemTarefa(id, st)),
+    ...arquivos.map(itemArquivo));
+  $("lista-vazia").classList.toggle("oculto", lista.children.length > 0);
+}
+
+function alertar(e) { mostrar($("msg-busca"), e.message, "erro"); window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+function renomear(a) {
+  const dlg = $("dlg-renomear");
+  const campo = $("novo-nome");
+  const ponto = a.nome.lastIndexOf(".");
+  campo.value = ponto > 0 ? a.nome.slice(0, ponto) : a.nome;
+  dlg.returnValue = "";
+  dlg.showModal();
+  campo.select();
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "ok" || !campo.value.trim()) return;
+    try { await api("/local/renomear", { nome: a.nome, novo: campo.value.trim() }); }
+    catch (e) { alertar(e); }
+    carregarArquivos();
+  };
+}
+
+function apagar(a) {
+  const dlg = $("dlg-confirmar");
+  $("confirmar-texto").textContent = `"${a.nome}" será apagado do computador.`;
+  dlg.returnValue = "";
+  dlg.showModal();
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "ok") return;
+    try { await api("/local/apagar", { nome: a.nome }); } catch (e) { alertar(e); }
+    carregarArquivos();
+  };
+}
+
+// ---------- início ----------
+$("form-busca").addEventListener("submit", (e) => { e.preventDefault(); buscar(); });
+$("link").addEventListener("paste", () => setTimeout(buscar, 0));
+$("btn-colar").addEventListener("click", async () => {
+  try {
+    $("link").value = (await navigator.clipboard.readText()).trim();
+    buscar();
+  } catch (e) {
+    $("link").focus();
+    mostrar($("msg-busca"), "Clique no campo e aperte Ctrl+V para colar o link.", "info");
+  }
+});
+$("op-video").addEventListener("click", () => escolherTipo("video"));
+$("op-audio").addEventListener("click", () => escolherTipo("audio"));
+$("qualidade").addEventListener("change", estimar);
+$("btn-baixar").addEventListener("click", baixar);
+$("btn-sobre").addEventListener("click", () => $("dlg-sobre").showModal());
+$("btn-pasta").addEventListener("click", () => api("/local/abrir-pasta", {}).catch(alertar));
+
+(async function iniciar() {
+  try {
+    const s = await api("/saude");
+    computador = s.computador;
+    $("btn-pasta").classList.toggle("oculto", !computador);
+    $("rodape-versao").textContent = `PegaMídia ${s.versao} • yt-dlp ${s.yt_dlp}`;
+    const avisos = [];
+    if (!s.ffmpeg) avisos.push("O ffmpeg não foi encontrado: vídeos e MP3 podem falhar.");
+    if (!s.deno) avisos.push("O Deno não foi encontrado: alguns vídeos do YouTube podem falhar.");
+    if (avisos.length) mostrar($("msg-busca"), avisos.join(" "), "aviso");
+    if (s.endereco_rede && computador) {
+      const r = $("rodape-rede");
+      r.replaceChildren("📱 Celulares na mesma rede Wi-Fi: no app, em Configurações, use ", el("code", {}, s.endereco_rede));
+      r.classList.remove("oculto");
+    }
+  } catch (e) {
+    mostrar($("msg-busca"), e.message, "erro");
+  }
+  for (const id of recuperar()) { tarefas.set(id, { estado: "na_fila", progresso: 0, mensagem: "…" }); acompanhar(id); }
+  await carregarArquivos();
+  desenhar();
+  $("link").focus();
+})();
+</script>
+</body>
+</html>

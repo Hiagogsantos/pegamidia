@@ -319,6 +319,29 @@ class DownloadManager extends ChangeNotifier {
     await _salvar();
   }
 
+  /// Muda o nome que aparece na lista e o nome do arquivo no aparelho (é o nome que
+  /// chega no e-mail/WhatsApp ao compartilhar). A extensão (.mp4/.mp3) é mantida.
+  /// Se já existir outro arquivo com esse nome, acrescenta " (2)", " (3)"…
+  Future<void> renomear(DownloadItem item, String novoNome) async {
+    final titulo = novoNome.trim();
+    if (titulo.isEmpty || item.emAndamento) return;
+    final caminho = item.caminho;
+    if (caminho != null && await File(caminho).exists()) {
+      final atual = File(caminho);
+      final nomeAtual = atual.uri.pathSegments.last;
+      final ponto = nomeAtual.lastIndexOf('.');
+      final extensao = ponto > 0 ? nomeAtual.substring(ponto) : '';
+      final novoArquivo = '${limparNomeArquivo(titulo)}$extensao';
+      if (novoArquivo != nomeAtual) {
+        final destino = await _caminhoLivre(novoArquivo);
+        item.caminho = (await atual.rename(destino.path)).path;
+      }
+    }
+    item.titulo = titulo;
+    notifyListeners();
+    await _salvar();
+  }
+
   /// Pasta `PegaMidia` dentro dos documentos do app; evita sobrescrever arquivos.
   Future<File> _caminhoLivre(String nome) async {
     final base = Directory('${(await _pastaBase()).path}/PegaMidia');

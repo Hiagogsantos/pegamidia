@@ -122,3 +122,24 @@ def test_pagina_so_com_javascript_usa_playwright(cliente, site_local):
     st = esperar(cliente, job)
     assert st["estado"] == "concluido", st
     assert st["nome_arquivo"] == "Produto legal.mp4"
+
+
+@pytest.mark.skipif(not navegador_ok, reason="Playwright/Chromium indisponível")
+def test_instagram_imagem_e_som_separados_sao_juntados(cliente, site_local):
+    r = cliente.post("/info", json={"url": f"{site_local}/dash.html"})
+    assert r.status_code == 200, r.text
+    assert r.json()["fonte"] == "pagina"
+    job = cliente.post("/download", json={"url": f"{site_local}/dash.html"}).json()["job_id"]
+    st = esperar(cliente, job)
+    assert st["estado"] == "concluido", st
+    assert st["nome_arquivo"] == "Reel de teste.mp4"
+    destino = cliente.app.state.tarefas.obter(job).arquivo
+    tipos = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+                            str(destino)], capture_output=True, text=True, check=True).stdout.split()
+    assert sorted(tipos) == ["audio", "video"]
+
+
+def test_info_de_mp4_direto_oferece_video(cliente, site_local):
+    corpo = cliente.post("/info", json={"url": f"{site_local}/produto.mp4"}).json()
+    assert corpo["tem_video"] is True
+    assert corpo["tem_audio"] is True
